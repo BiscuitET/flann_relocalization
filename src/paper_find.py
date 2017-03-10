@@ -3,6 +3,7 @@
 
 import rospy
 import math
+import os
 from numpy import *
 from pyflann import *
 from sys import *
@@ -28,6 +29,7 @@ lidar_dict = {}
 hist_bin_size = 5
 tao = 2
 Build_GSFH_Database = False
+GSFH_Database_name = "GSFH.dat"
 
 def alpha_funtion(first_vector, second_vector):
 	k1 = (second_vector[1] - first_vector[1])/(second_vector[0] - first_vector[0])
@@ -204,7 +206,7 @@ def find_clust(list_data):
 	return data_tmp.index(sort_tmp[-1]), data_tmp.index(sort_tmp[-2])
 
 def build_database(GSFH):
-	f = open("GSFH.dat", 'a+')
+	f = open(GSFH_Database_name, 'a+')
 	f.writelines(str(GSFH))
 	f.write("\n")
 	f.close()
@@ -237,15 +239,24 @@ def callback(data):
 	Mix_hist = get_mix_GSFH(Q1, Q2, Q1_pointlist, Q2_pointlist)
 
 	GSFH = Q1_hist + Q2_hist + Mix_hist
-	current_GSFH = array([float(x) for x in GSFH])
 
-	result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
-	print result
 	if Build_GSFH_Database == True:
+		## build_database(GSFH)
 		print "Start to build!!"
+	else:
+		current_GSFH = array([float(x) for x in GSFH])
+		#result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
+		result, dists = flann.nn(GSFH_database, current_GSFH, 4)
+		print result
+
+def build_database(GSFH):
+	f = open(GSFH_Database_name, 'a+')
+	f.writelines(str(GSFH))
+	f.write("\n")
+	f.close()
 
 def read_database():
-	f = open("GSFH.dat",'r')
+	f = open(GSFH_Database_name,'r')
 	data_base = []
 	for line in f:
 		data = line[1:len(line) - 2].split(',')
@@ -261,9 +272,19 @@ def listener():
 
 if __name__ == '__main__':
 	if len(argv) >= 2 and argv[1] == "-build":
-		Build_GSFH_Database = True
-	GSFH_database = read_database()
-	flann = FLANN()
+		input = raw_input("Sure to rebuild the total database?( Y / N )")
+		if input == "Y" or input == "y":
+			print "Start rebuild process ..."
+			if os.path.exists(GSFH_Database_name):
+				print "Delet file"
+				# os.remove(GSFH_Database_name)
+			Build_GSFH_Database = True
+		else:
+			print "Give up rebuild process ..."
+			exit(0)
+	else:
+		GSFH_database = read_database()
+		flann = FLANN()
 	rospy.init_node('listener', anonymous = True)
 	rospy.Subscriber("lidar", LaserScan, callback)
 	rospy.spin()
