@@ -8,6 +8,9 @@ from numpy import *
 from pyflann import *
 from sys import *
 from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from amcl.msg import PoseWithWeightArray
+from amcl.msg import PoseWithCovarianceArrayStamped
 
 global min_angle
 global max_angle
@@ -57,7 +60,9 @@ def index_to_cartesian(clust_data, clust_point_list):
 
 	for i in range(len(clust_pointlist) - 1):
 		k,b = formed_line(clust_data[clust_pointlist[i]], clust_data[clust_pointlist[i + 1]])
-		# print "got k = " , k
+		print "got k = " , k
+		print clust_pointlist[i], clust_pointlist[i + 1]
+		print clust_data[clust_pointlist[i]], clust_data[clust_pointlist[i + 1]]
 		for j in range(clust_pointlist[i] ,clust_pointlist[i + 1]):
 			coordinary_array[j][2] = -1 / k
 
@@ -73,6 +78,8 @@ def get_mix_GSFH(clust_data_one, clust_data_two, clust_pointlist_one, clust_poin
 
 	for i in range(1, len(clust_data_one) - 1):
 		alpha_angle = alpha_funtion(coordinary_array_two[0], coordinary_array_one[i] )
+		if isnan(alpha_angle):
+			print "NaN message!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1"
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array_two[len(clust_data_two) - 1], coordinary_array_one[i] )
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
@@ -110,7 +117,7 @@ def formed_line(head_node, tail_node):
 	theta = index_to_angle(lidar_dict, tail_node)
 	x.append( tail_node * math.cos(math.radians(theta)) )
 	y.append( tail_node * math.sin(math.radians(theta)) )
-
+	# print y[1], y[0], x[1], x[0]
 	k = (y[1] - y[0]) / ((x[1] - x[0]) + 0.0000000001)
 	b = y[1] - k * x[1]
 
@@ -211,7 +218,7 @@ def build_database(GSFH):
 	f.write("\n")
 	f.close()
 
-def callback(data):
+def lidar_callback(data):
 	lidar_clust = []
 	clust = []
 	rospy.loginfo(rospy.get_caller_id() + "Get lidar message")
@@ -234,20 +241,24 @@ def callback(data):
 	Q1_pointlist = line_fitting(Q1) # check if clust has inflexion
 	Q2_pointlist = line_fitting(Q2)
 
-	Q1_hist = get_GSFH(Q1, Q1_pointlist)
+	# Q1_hist = get_GSFH(Q1, Q1_pointlist)
 	Q2_hist = get_GSFH(Q2, Q2_pointlist)
-	Mix_hist = get_mix_GSFH(Q1, Q2, Q1_pointlist, Q2_pointlist)
+	# Mix_hist = get_mix_GSFH(Q1, Q2, Q1_pointlist, Q2_pointlist)
 
-	GSFH = Q1_hist + Q2_hist + Mix_hist
+	# GSFH = Q1_hist + Q2_hist + Mix_hist
 
-	if Build_GSFH_Database == True:
-		## build_database(GSFH)
-		print "Start to build!!"
-	else:
-		current_GSFH = array([float(x) for x in GSFH])
-		#result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
-		result, dists = flann.nn(GSFH_database, current_GSFH, 4)
-		print result
+	# if Build_GSFH_Database == True:
+	# 	## build_database(GSFH)
+	# 	print "Start to build!!"
+	# else:
+	# 	current_GSFH = array([float(x) for x in GSFH])
+	# 	#result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
+	# 	result, dists = flann.nn(GSFH_database, current_GSFH, 4)
+	# 	print result
+
+def amcl_callback(data):
+	print "receive amcl_posedata!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+	
 
 def build_database(GSFH):
 	f = open(GSFH_Database_name, 'a+')
@@ -265,14 +276,14 @@ def read_database():
 
 	return array(data_base)
 
-def listener():
-	rospy.init_node('listener', anonymous = True)
-	rospy.Subscriber("lidar", LaserScan, callback)
+def relocalization():
+	rospy.init_node('relocalization', anonymous = True)
+	rospy.Subscriber("lidar", LaserScan, lidar_callback)
 	rospy.spin()
 
 if __name__ == '__main__':
 	if len(argv) >= 2 and argv[1] == "-build":
-		input = raw_input("Sure to rebuild the total database?( Y / N )")
+		input = raw_input("Sure to rebuild the total database? ( Y/N )")
 		if input == "Y" or input == "y":
 			print "Start rebuild process ..."
 			if os.path.exists(GSFH_Database_name):
@@ -285,8 +296,9 @@ if __name__ == '__main__':
 	else:
 		GSFH_database = read_database()
 		flann = FLANN()
-	rospy.init_node('listener', anonymous = True)
-	rospy.Subscriber("lidar", LaserScan, callback)
+	rospy.init_node('relocalization', anonymous = True)
+	rospy.Subscriber("lidar", LaserScan, lidar_callback)
+	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amcl_callback)
 	rospy.spin()
 	# while not rospy.is_shutdown():
 	# 	if receive_data == True:
