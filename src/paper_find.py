@@ -4,6 +4,7 @@
 import rospy
 import math
 import os
+import message_filters
 from numpy import *
 from pyflann import *
 from sys import *
@@ -24,6 +25,8 @@ global GSFH_database
 global Build_GSFH_Database
 global flann
 global line_threshold
+global G_index
+global Pose_table
 
 
 min_angle = -135.0
@@ -34,7 +37,10 @@ hist_bin_size = 5
 tao = 2   						# the threshold to classicfid lidar message
 line_threshold = 1 				# the threshold to find the flexion
 Build_GSFH_Database = False
-GSFH_Database_name = "GSFH.dat"
+GSFH_Database_name = "GSFH_v1.dat"
+Index_Table_name = "IndexTable_v1.dat"
+G_index = 0
+
 
 def alpha_funtion(first_vector, second_vector):
 	k1 = (second_vector[1] - first_vector[1])/(second_vector[0] - first_vector[0])
@@ -89,7 +95,7 @@ def get_mix_GSFH(clust_data_one, clust_data_two, clust_pointlist_one, clust_poin
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array_one[len(clust_data_one) - 1], coordinary_array_two[i] )
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
-	
+	mix_hist = [int(mix_hist[x] / 4) for x in range(len(mix_hist))]
 	return mix_hist
 
 def get_GSFH(clust_data, clust_pointlist):
@@ -104,6 +110,7 @@ def get_GSFH(clust_data, clust_pointlist):
 		hist[ int( alpha_angle/ hist_bin_size) ] = hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array[len(clust_data) - 1], coordinary_array[i] )
 		hist[ int( alpha_angle/ hist_bin_size) ] = hist[ int( alpha_angle/ hist_bin_size) ] + 1
+	hist = [int(hist[x]/2) for x in range(len(hist))]
 
 	return hist
 
@@ -199,7 +206,7 @@ def line_fitting(clust_data):
 				break
 		head_node = tail_node
 		tail_node = len(clust_data) - 1
-		print "Got a point = ", head_node
+		# print "Got a point = ", head_node
 		point_list.append(head_node)
 	return point_list
 
@@ -225,10 +232,10 @@ def build_database(GSFH):
 	f.write("\n")
 	f.close()
 
-def lidar_callback(data):
+def extract_features(data):
 	lidar_clust = []
 	clust = []
-	rospy.loginfo(rospy.get_caller_id() + "Get lidar message")
+
 	for i in range(len(data.ranges)):
 		lidar_dict[i] = data.ranges[i]
 		if (i < len(data.ranges)-1) and (data.ranges[i + 1] - data.ranges[i] < tao) and (data.ranges[i + 1] - data.ranges[i] > -tao):
@@ -237,44 +244,69 @@ def lidar_callback(data):
 			clust.append(i)
 			lidar_clust.append(clust)
 			clust = []
-	print "total len = ", len(lidar_clust)
-	for i in range(len(lidar_clust)):
-		print len(lidar_clust[i]),
-	print 
+	# print "total len = ", len(lidar_clust)
+	# for i in range(len(lidar_clust)):
+	# 	print len(lidar_clust[i]),
+	# print 
 
 	Q1_index, Q2_index = find_clust(lidar_clust)  # find the largest and second largest clust
 	Q1 = lidar_clust[Q1_index]
 	Q2 = lidar_clust[Q2_index]	
 
-	print "Dealing with Q1"
+	# print "Dealing with Q1"
 	Q1_pointlist = line_fitting(Q1) # check if clust has inflexion
 	Q1_hist = get_GSFH(Q1, Q1_pointlist)
-	print "Dealing with Q2"
+	# print "Dealing with Q2"
 	Q2_pointlist = line_fitting(Q2)
 	Q2_hist = get_GSFH(Q2, Q2_pointlist)
-	print "Dealing with Mix_hist"
+	# print "Dealing with Mix_hist"
 	Mix_hist = get_mix_GSFH(Q1, Q2, Q1_pointlist, Q2_pointlist)
 
 	GSFH = Q1_hist + Q2_hist + Mix_hist
 
-	if Build_GSFH_Database == True:
-		## build_database(GSFH)
-		print "Start to build!!"
-	else:
-		current_GSFH = array([float(x) for x in GSFH])
-		# result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
-		result, dists = flann.nn(GSFH_database, current_GSFH, 4)
-		print result
+	return GSFH
 
-def amcl_callback(data):
-	print "receive amcl_posedata!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-	
+	# if Build_GSFH_Database == True:
+	# 	## build_database(GSFH)
+	# 	print "Start to build!!"
+	# else:
+	# 	current_GSFH = array([float(x) for x in GSFH])
+	# 	# result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
+	# 	result, dists = flann.nn(GSFH_database, current_GSFH, 4)
+	# 	print result	
+
+def flann_search(data):
+	current_GSFH = array([float(x) for x in data])
+	result, dists = flann.nn(GSFH_database, current_GSFH, 5)
+	print result
+	checktable(Pose_table, result)
+
+def checktable(posetable, result):
+	for i in range(len(result[0])):
+		print posetable[result[0][i]]
+
+def lidar_callback(data):
+	rospy.loginfo(rospy.get_caller_id() + "Get lidar message")
+	realtime_GSFH = extract_features(data)
+	flann_search(realtime_GSFH)
+
 
 def build_database(GSFH):
 	f = open(GSFH_Database_name, 'a+')
 	f.writelines(str(GSFH))
 	f.write("\n")
 	f.close()
+
+def build_indextable(pose):
+	f = open(Index_Table_name, 'a+')
+	f.write(str(pose.position.x))
+	f.write(' ')
+	f.write(str(pose.position.y))
+	f.write(' ')
+	f.write(str(pose.orientation.z))
+	f.write("\n")
+	f.close()
+
 
 def read_database():
 	f = open(GSFH_Database_name,'r')
@@ -286,10 +318,32 @@ def read_database():
 
 	return array(data_base)
 
+def read_indextable():
+	pose_table_dict = {}
+	index = 0
+	f = open(Index_Table_name, 'r')
+	for line in f:
+		data = line.strip().split(' ')
+		data = [float(x) for x in data]
+		pose_table_dict[index] = data
+		index = index + 1
+
+	return pose_table_dict
+
+
 def relocalization():
 	rospy.init_node('relocalization', anonymous = True)
 	rospy.Subscriber("lidar", LaserScan, lidar_callback)
 	rospy.spin()
+
+def syc_callback(lidar_data, amcl_data):
+	GSFH = extract_features(lidar_data)
+	if Build_GSFH_Database == True:
+		build_database(GSFH)
+		build_indextable(amcl_data.pose.pose)
+
+	print "syc_callback!"
+
 
 if __name__ == '__main__':
 	if len(argv) >= 2 and argv[1] == "-build":
@@ -297,22 +351,28 @@ if __name__ == '__main__':
 		if input == "Y" or input == "y":
 			print "Start rebuild process ..."
 			if os.path.exists(GSFH_Database_name):
-				print "Delet file"
-				# os.remove(GSFH_Database_name)
+				print "Delet GSFH_Database"
+				os.remove(GSFH_Database_name)
+			if os.path.exists(Index_Table_name):
+				print "Delet IndexTable"
+				os.remove(Index_Table_name)
 			Build_GSFH_Database = True
 		else:
 			print "Give up rebuild process ..."
 			exit(0)
 	else:
 		GSFH_database = read_database()
+		Pose_table = read_indextable()
 		flann = FLANN()
 	rospy.init_node('relocalization', anonymous = True)
-	rospy.Subscriber("lidar", LaserScan, lidar_callback)
-	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amcl_callback)
+	# rospy.Subscriber("lidar", LaserScan, lidar_callback)
+	# rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amcl_callback)
+	if Build_GSFH_Database == True:
+		lidar_sub = message_filters.Subscriber('lidar', LaserScan)
+		amcl_sub = message_filters.Subscriber('amcl_pose', PoseWithCovarianceStamped)
+		ts = message_filters.TimeSynchronizer([lidar_sub, amcl_sub], 10)
+		ts.registerCallback(syc_callback)
+	else:
+		rospy.Subscriber("lidar", LaserScan, lidar_callback)
 	rospy.spin()
-	# while not rospy.is_shutdown():
-	# 	if receive_data == True:
-	# 		result, dists = flann.nn(GSFH_database, current_GSFH, 4, algorithm="kmeans", branching=32, iterations=7, checks=16)
-	# 		print result
-	# exit(0)
 			
