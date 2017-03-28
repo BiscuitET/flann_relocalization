@@ -12,6 +12,8 @@ from sys import *
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from geometry_msgs.msg import PoseWithCovariance
+from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseArray
 from amcl.msg import PoseWithWeightArray
 from amcl.msg import PoseWithCovarianceArrayStamped
 
@@ -39,12 +41,15 @@ lidar_sample = 360.0
 lidar_range = 30.0
 lidar_dict = {}
 hist_bin_size = 5
-tao = 2   						# the threshold to classicfid lidar message
+range_hist_bin_size = 2
+tao = 0.5   						# the threshold to classicfid lidar message
 line_threshold = 1 				# the threshold to find the flexion
 Build_GSFH_Database = False
-GSFH_Database_name = "GSFH_v2.dat" #"GSFH_Database_name_test"
-GSFH_Database_name_range = "GSFH_Range_v2.dat"
-Index_Table_name = "IndexTable_v2.dat"
+Offline_Build = False
+Online_Build = False
+GSFH_Database_name = "GSFH_small_v4.dat" #"GSFH_Database_name_test"
+GSFH_Database_name_range = "GSFH_Range_small_v4.dat"
+Index_Table_name = "IndexTable_small_v4.dat"
 G_index = 0
 
 
@@ -91,15 +96,25 @@ def get_mix_GSFH(clust_data_one, clust_data_two, clust_pointlist_one, clust_poin
 	for i in range(1, len(clust_data_one) - 1):
 		alpha_angle = alpha_funtion(coordinary_array_two[0], coordinary_array_one[i] )
 		if isnan(alpha_angle):
-			print "NaN message ################################### "
+			alpha_angle = 0
+			print "NaN message1 ################################### "
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array_two[len(clust_data_two) - 1], coordinary_array_one[i] )
+		if isnan(alpha_angle):
+			alpha_angle = 0
+			print "NaN message2 ################################### "
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 
 	for i in range(1, len(clust_data_two) - 1):
 		alpha_angle = alpha_funtion(coordinary_array_one[0], coordinary_array_two[i] )
+		if isnan(alpha_angle):
+			alpha_angle = 0
+			print "NaN message3 ################################### "
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array_one[len(clust_data_one) - 1], coordinary_array_two[i] )
+		if isnan(alpha_angle):
+			alpha_angle = 0
+			print "NaN message4 ################################### "
 		mix_hist[ int( alpha_angle/ hist_bin_size) ] = mix_hist[ int( alpha_angle/ hist_bin_size) ] + 1
 	mix_hist = [int(mix_hist[x] / 4) for x in range(len(mix_hist))]
 	return mix_hist
@@ -113,8 +128,14 @@ def get_GSFH(clust_data, clust_pointlist):
 
 	for i in range(1, len(clust_data) - 1):
 		alpha_angle = alpha_funtion(coordinary_array[0], coordinary_array[i] )
+		if isnan(alpha_angle):
+			alpha_angle = 0
+			print "NaN message5 ################################### "
 		hist[ int( alpha_angle/ hist_bin_size) ] = hist[ int( alpha_angle/ hist_bin_size) ] + 1
 		alpha_angle = alpha_funtion(coordinary_array[len(clust_data) - 1], coordinary_array[i] )
+		if isnan(alpha_angle):
+			alpha_angle = 0
+			print "NaN message6 ################################### "
 		hist[ int( alpha_angle/ hist_bin_size) ] = hist[ int( alpha_angle/ hist_bin_size) ] + 1
 	hist = [int(hist[x]/2) for x in range(len(hist))]
 
@@ -136,7 +157,7 @@ def formed_line(head_node, tail_node):
 	x.append( range_data * math.cos(math.radians(theta)) )
 	y.append( range_data * math.sin(math.radians(theta)) )
 	# print y[1], y[0], x[1], x[0]
-	k = (y[1] - y[0]) / ((x[1] - x[0]) + 0.0000000001)
+	k = (y[1] - y[0] + 0.0000000001 )  / ((x[1] - x[0]) + 0.0000000001)
 	b = y[1] - k * x[1]
 
 	# print "formed k , b = " , k,b
@@ -146,23 +167,26 @@ def find_node(clust_data):
 	inflexion = -1
 	line_threshold = 1
 	max_threshold = -1
-	k, b = formed_line(clust_data[0], clust_data[ -1 ]) 
-	for i in range(len(clust_data)):
-		theta = index_to_angle(clust_data[i])
-		range_data = lidar_dict[clust_data[i]]
-		# theta = index_to_angle(lidar_dict, clust_data[i])
-		x = range_data * math.cos(math.radians(theta))
-		y = range_data * math.sin(math.radians(theta))
-		# tmp_threshold = abs(abs(k * x + b) - abs(clust_dict[x]))
-		tmp_threshold = abs((k * x - 1 * y + b) / sqrt(k*k + 1))  # calc point to line distance
-		if (tmp_threshold < line_threshold) :
-			pass
-		else :
-			if tmp_threshold > max_threshold :
-				max_threshold = tmp_threshold
-				inflexion = i
-	# print "max_threshold = ", max_threshold
-	return inflexion
+	if len(clust_data) > 0:
+		k, b = formed_line(clust_data[0], clust_data[ -1 ]) 
+		for i in range(len(clust_data)):
+			theta = index_to_angle(clust_data[i])
+			range_data = lidar_dict[clust_data[i]]
+			# theta = index_to_angle(lidar_dict, clust_data[i])
+			x = range_data * math.cos(math.radians(theta))
+			y = range_data * math.sin(math.radians(theta))
+			# tmp_threshold = abs(abs(k * x + b) - abs(clust_dict[x]))
+			tmp_threshold = abs((k * x - 1 * y + b) / sqrt(k*k + 1))  # calc point to line distance
+			if (tmp_threshold < line_threshold) :
+				pass
+			else :
+				if tmp_threshold > max_threshold :
+					max_threshold = tmp_threshold
+					inflexion = i
+		# print "max_threshold = ", max_threshold
+		return inflexion
+	else:
+		return inflexion
 
 
 def myself_line_fitting(clust_data):
@@ -224,7 +248,7 @@ def find_clust(list_data):
 	second_max_clust = 0
 	data_tmp = []
 	sort_tmp = []
-	if len(list_data) == 1:
+	if len(list_data) <= 1:
 		return 0, 0 
 	for i in range(len(list_data)):
 		data_tmp.append(len(list_data[i]))
@@ -240,14 +264,14 @@ def build_database(GSFH):
 
 def get_clustrange(clust_data):
 	clust_range = []
-	for i in range(int(lidar_range / 1)):
+	for i in range(int(lidar_range / range_hist_bin_size)):
 		clust_range.append(0)
 
 	for i in range(len(clust_data)):
-		index = int(lidar_dict[clust_data[i]] - 0.001 / 1)
+		index = int((lidar_dict[clust_data[i]] - 0.001) / range_hist_bin_size)
 		clust_range[index] = clust_range[index] + 1
 
-	clust_range = [int(clust_range[x]/2) for x in range(len(clust_range))]
+	clust_range = [int(clust_range[x]/range_hist_bin_size) for x in range(len(clust_range))]
 
 	return clust_range
 
@@ -285,8 +309,8 @@ def extract_features(data):
 
 	GSFH = Q1_hist + Q2_hist + Mix_hist
 	My_GSFH = Q1_hist + Q2_hist + Mix_hist + Q1_range + Q2_range
-	print GSFH
-	print My_GSFH
+	# print GSFH
+	# print My_GSFH
 
 	return GSFH, My_GSFH
 
@@ -322,6 +346,24 @@ def init_poses(possible_poses):
 		continue
 	mutil_pub.publish(poses)
 
+def search_pose_result(possible_poses):
+	pose_msg = PoseArray()
+	single_pose_msg = Pose()
+	result_pub = rospy.Publisher("search_pose", PoseArray)
+
+	for i in range(len(possible_poses)):
+		single_pose_msg.position.x = possible_poses[i][0]
+		single_pose_msg.position.y = possible_poses[i][1]
+		single_pose_msg.position.z = 0
+		single_pose_msg.orientation.x = 0 
+		single_pose_msg.orientation.y = 0
+		single_pose_msg.orientation.z = possible_poses[i][2]
+		single_pose_msg.orientation.w = possible_poses[i][3]
+		pose_msg.poses.append(single_pose_msg)
+		
+	result_pub.publish(pose_msg)
+
+
 def flann_search(base,data):
 	current_GSFH = array([float(x) for x in data])
 	start_time = time.time()
@@ -336,13 +378,14 @@ def checktable(posetable, result):
 		search_pose.append(posetable[result[0][i]])
 		print posetable[result[0][i]]
 
-	init_poses(search_pose)
+	# search_pose_result(search_pose)
+	# init_poses(search_pose)
 
 def lidar_callback(data):
 	rospy.loginfo(rospy.get_caller_id() + "Get lidar message")
 	realtime_GSFH ,G= extract_features(data)
-	# print "paper result : "
-	# flann_search(GSFH_database,realtime_GSFH)
+	print "paper result : "
+	flann_search(GSFH_database,realtime_GSFH)
 	print "my result :"
 	flann_search(GSFH_RANGE,G)
 
@@ -360,6 +403,8 @@ def build_indextable(pose):
 	f.write(str(pose.position.y))
 	f.write(' ')
 	f.write(str(pose.orientation.z))
+	f.write(' ')
+	f.write(str(pose.orientation.w))
 	f.write("\n")
 	f.close()
 
@@ -401,9 +446,21 @@ def syc_callback(lidar_data, amcl_data):
 
 	rospy.loginfo(rospy.get_caller_id() + "Building Database...")
 
+def trainPoses_callback(pose_data):
+	if Build_GSFH_Database == True:
+		# print "Building indextable ..."
+		build_indextable(pose_data)
+
+def trainGSFH_callback(lidar_data):
+	GSFH,My_GSFH = extract_features(lidar_data)
+	if Build_GSFH_Database == True:
+		# print "Building database ..."
+		build_database(GSFH, GSFH_Database_name)
+		build_database(My_GSFH, GSFH_Database_name_range)
+
 
 if __name__ == '__main__':
-	if len(argv) >= 2 and argv[1] == "-build":
+	if len(argv) >= 3 and argv[1] == "--build":
 		input = raw_input("Sure to rebuild the total database? ( Y/N )")
 		if input == "Y" or input == "y":
 			print "Start rebuild process ..."
@@ -420,6 +477,16 @@ if __name__ == '__main__':
 		else:
 			print "Give up rebuild process ..."
 			exit(0)
+
+		if argv[2] == "--offline":
+			Online_Build = False
+			Offline_Build = True
+		elif argv[2] == "--online":
+			Online_Build = True
+			Offline_Build = False
+		else:
+			print "Online or Offline build database?"
+
 	else:
 		GSFH_database = read_database(GSFH_Database_name)
 		GSFH_RANGE = read_database(GSFH_Database_name_range)
@@ -429,10 +496,16 @@ if __name__ == '__main__':
 	# rospy.Subscriber("lidar", LaserScan, lidar_callback)
 	# rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amcl_callback)
 	if Build_GSFH_Database == True:
-		lidar_sub = message_filters.Subscriber('lidar', LaserScan)
-		amcl_sub = message_filters.Subscriber('amcl_pose', PoseWithCovarianceStamped)
-		ts = message_filters.TimeSynchronizer([lidar_sub, amcl_sub], 10)
-		ts.registerCallback(syc_callback)
+		if Offline_Build == True:
+			print "Start Offline Building ..."
+			rospy.Subscriber("train_poses", Pose, trainPoses_callback)
+			rospy.Subscriber("train_fake_laser", LaserScan, trainGSFH_callback)
+		if Online_Build == True:
+			print "Start Online Building ..."
+			lidar_sub = message_filters.Subscriber('lidar', LaserScan)
+			amcl_sub = message_filters.Subscriber('amcl_pose', PoseWithCovarianceStamped)
+			ts = message_filters.TimeSynchronizer([lidar_sub, amcl_sub], 10)
+			ts.registerCallback(syc_callback)
 	else:
 		rospy.Subscriber("lidar", LaserScan, lidar_callback)
 	rospy.spin()
