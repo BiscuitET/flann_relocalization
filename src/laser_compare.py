@@ -27,7 +27,7 @@ def fake_callback(fake_data):
 	callback.__fscan = fake_data
 
 def get_model_position(name = 'evarobot'):
-	model_pub = rospy.Publisher("model_pose", Pose)
+	model_pub = rospy.Publisher("model_pose", Pose, queue_size = 10)
 	model_pose_msg = Pose()
 	rospy.wait_for_service('/gazebo/get_model_state')
 	try:
